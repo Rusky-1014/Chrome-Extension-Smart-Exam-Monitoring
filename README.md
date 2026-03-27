@@ -12,7 +12,7 @@ Traditional proctoring is dull. **SmartClass** transforms classroom supervision 
 ## ⚡ Key Features
 
 ### 🖥️ 3D Tactical Matrix
-![Dashboard Matrix](assets/dashboard.png)
+![Dashboard Matrix](assets/evidence_report.png)
 - Visualizes up to 50 active PC nodes in a high-impact Three.js HUD.
 - Real-time station mapping: 🟢 Connected, 🔴 Breach, ⚠️ Tampered.
 
@@ -21,7 +21,7 @@ Traditional proctoring is dull. **SmartClass** transforms classroom supervision 
 - Instant 3s screen-stream for targeted, aggressive supervision.
 
 ### 📊 Evidence Reporting
-![Export Report](assets/evidence_report.png)
+![Export Report](assets/dashboard.png)
 - Automated HTML audit dossier generated at session end.
 
 - **🛡️ 3D Tactical Matrix Dashboard**: A high-impact Three.js HUD that visualizes up to 50 active PC nodes. Each card maps a student's state:
