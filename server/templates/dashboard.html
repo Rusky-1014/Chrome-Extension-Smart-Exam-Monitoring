@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Smart Classroom Matrix</title>
+  <script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <style>
+    :root {
+      --bg: #020208;
+      --hud-green: #00ff66;
+      --hud-red: #ff003c;
+      --hud-yellow: #ffcf00;
+      --hud-gray: #333344;
+      --glass: rgba(10, 15, 30, 0.7);
+    }
+    body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: var(--bg); font-family: 'Courier New', Courier, monospace; color: white; overflow-x: hidden; }
+    #bg-canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; opacity: 0.6; }
+    
+    .dashboard-container { position: relative; z-index: 10; padding: 20px; display: flex; flex-direction: column; gap: 20px; }
+    
+    .top-bar { display: flex; justify-content: space-between; align-items: center; background: var(--glass); padding: 15px 30px; border: 1px solid rgba(0, 255, 102, 0.3); border-radius: 8px; backdrop-filter: blur(10px); box-shadow: 0 0 15px rgba(0, 255, 102, 0.1); }
+    .top-bar h1 { margin: 0; font-size: 24px; text-transform: uppercase; letter-spacing: 2px; text-shadow: 0 0 10px var(--hud-green); color: var(--hud-green); }
+    
+    .stats { display: flex; gap: 30px; }
+    .stat-box { text-align: right; }
+    .stat-box span { font-size: 28px; font-weight: bold; }
+    
+    .main-content { display: flex; gap: 20px; }
+    
+    .grid-section { flex: 3; background: var(--glass); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; padding: 20px; backdrop-filter: blur(5px); }
+    .grid-section h2 { margin-top: 0; font-size: 18px; color: #aaa; text-transform: uppercase; letter-spacing: 1px; }
+    
+    .pc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 15px; }
+    
+    .pc-card { background: rgba(0,0,0,0.5); border: 1px solid var(--hud-gray); padding: 15px; border-radius: 6px; text-align: center; transition: all 0.3s ease; position: relative; overflow: hidden; }
+    .pc-card::before { content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 2px; background: var(--hud-gray); }
+    
+    .pc-card.offline { color: #666; }
+    .pc-card.normal { border-color: rgba(0,255,102,0.3); color: #fff; box-shadow: inset 0 0 10px rgba(0,255,102,0.1); }
+    .pc-card.normal::before { background: var(--hud-green); box-shadow: 0 0 10px var(--hud-green); }
+    
+    .pc-card.suspicious { border-color: rgba(255,207,0,0.4); color: #fff; box-shadow: inset 0 0 10px rgba(255,207,0,0.1); }
+    .pc-card.suspicious::before { background: var(--hud-yellow); box-shadow: 0 0 10px var(--hud-yellow); }
+    
+    .pc-card.violation { border-color: rgba(255,0,60,0.6); color: #fff; box-shadow: inset 0 0 15px rgba(255,0,60,0.3); animation: flashRed 0.8s infinite alternate; }
+    .pc-card.violation::before { background: var(--hud-red); box-shadow: 0 0 15px var(--hud-red); }
+    
+    @keyframes flashRed { from { background: rgba(255,0,60,0.05); } to { background: rgba(255,0,60,0.25); } }
+    
+    .pc-icon { font-size: 24px; margin-bottom: 8px; }
+    .pc-id { font-weight: bold; letter-spacing: 1px; font-size: 18px; }
+    .pc-status-text { font-size: 12px; margin-top: 5px; opacity: 0.8; text-transform: uppercase; }
+    
+    .alerts-section { flex: 1.5; background: var(--glass); border: 1px solid rgba(255, 0, 60, 0.3); border-radius: 8px; padding: 20px; backdrop-filter: blur(5px); display: flex; flex-direction: column; overflow-y: auto; max-height: 80vh; }
+    .alerts-section h2 { margin-top: 0; font-size: 18px; color: var(--hud-red); text-transform: uppercase; letter-spacing: 1px; text-shadow: 0 0 5px var(--hud-red); }
+    
+    .alert-log { display: flex; flex-direction: column; gap: 15px; }
+    .alert-item { background: rgba(255,0,60,0.1); border-left: 4px solid var(--hud-red); padding: 15px; border-radius: 4px; animation: slideIn 0.3s ease-out forwards; }
+    
+    @keyframes slideIn { from { transform: translateX(50px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    
+    .alert-item img { width: 100%; border-radius: 4px; border: 1px solid var(--hud-red); margin-bottom: 10px; box-shadow: 0 0 10px rgba(255,0,60,0.2); }
+    .alert-meta { font-size: 13px; line-height: 1.5; }
+    .alert-meta span { color: var(--hud-red); font-weight: bold; }
+    .alert-meta a { color: #fff; text-decoration: underline; word-break: break-all; }
+  </style>
+</head>
+<body>
+
+  <!-- 3D Matrix Background -->
+  <canvas id="bg-canvas"></canvas>
+
+  <div class="dashboard-container">
+    <div class="top-bar">
+      <h1>📡 Tactical Ops Matrix</h1>
+      <div class="stats">
+        <div class="stat-box">
+          <div>ARP NODES</div>
+          <span id="networkCount" style="color: #0ff;">Scanning...</span>
+        </div>
+        <div class="stat-box">
+          <div>TOTAL BREACHES</div>
+          <span id="violationCount" style="color: var(--hud-red);">{{ total }}</span>
+        </div>
+        <!-- Moved Export Button Here -->
+        <button class="export-btn" onclick="exportReport()" style="height: fit-content; margin-left: 20px;">📥 EXPORT REPORT</button>
+      </div>
+    </div>
+
+    <div class="main-content">
+      <div class="grid-section">
+        <h2>Network Capacity Overview [ 50 Slots ]</h2>
+        <div class="pc-grid" id="grid">
+          <!-- JS injecting 50 slots natively -->
+        </div>
+      </div>
+      
+      <div class="alerts-section">
+        <h2>⚠️ Active Threat Logs</h2>
+        <div class="alert-log" id="alerts">
+          <div style="color: #666; font-style: italic;">No current threats detected...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // --- THREE.JS ADVANCED BACKGROUND ---
+    const canvas = document.getElementById('bg-canvas');
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.FogExp2(0x020208, 0.0012);
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+    
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(window.devicePixelRatio);
+    
+    // Create floating particles/nodes matrix
+    const geometry = new THREE.BufferGeometry();
+    const particlesCount = 2000;
+    const posArray = new Float32Array(particlesCount * 3);
+    
+    for(let i = 0; i < particlesCount * 3; i++) {
+        posArray[i] = (Math.random() - 0.5) * 25; 
+    }
+    
+    geometry.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+    const material = new THREE.PointsMaterial({
+        size: 0.04,
+        color: 0x00ff66,
+        transparent: true,
+        opacity: 0.8,
+        blending: THREE.AdditiveBlending
+    });
+    
+    const particlesMesh = new THREE.Points(geometry, material);
+    scene.add(particlesMesh);
+    
+    // Core server polygon representation
+    const coreGeo = new THREE.IcosahedronGeometry(2, 1);
+    const coreMat = new THREE.MeshBasicMaterial({ color: 0x00ff66, wireframe: true, transparent: true, opacity: 0.15 });
+    const coreMesh = new THREE.Mesh(coreGeo, coreMat);
+    scene.add(coreMesh);
+
+    camera.position.z = 6;
+    
+    let mouseX = 0;
+    let mouseY = 0;
+    document.addEventListener('mousemove', (e) => {
+        mouseX = (e.clientX / window.innerWidth - 0.5) * 0.5;
+        mouseY = (e.clientY / window.innerHeight - 0.5) * 0.5;
+    });
+
+    const clock = new THREE.Clock();
+    
+    // Sub-render loop
+    function animate() {
+        requestAnimationFrame(animate);
+        const elapsedTime = clock.getElapsedTime();
+        
+        particlesMesh.rotation.y = elapsedTime * 0.04;
+        particlesMesh.rotation.x = elapsedTime * 0.01;
+        coreMesh.rotation.y = elapsedTime * 0.2;
+        coreMesh.rotation.x = elapsedTime * 0.1;
+        
+        camera.position.x += (mouseX - camera.position.x) * 0.05;
+        camera.position.y += (-mouseY - camera.position.y) * 0.05;
+        camera.lookAt(scene.position);
+        
+        renderer.render(scene, camera);
+    }
+    animate();
+    
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // --- DASHBOARD SOCKET LOGIC ---
+    const socket = io();
+    let violationCount = parseInt(document.getElementById("violationCount").innerText) || 0;
+    const TOTAL_CAPACITY = 50;
+    const gridEl = document.getElementById("grid");
+    const alertsEl = document.getElementById("alerts");
+    
+    // Store states
+    const stations = {}; 
+    
+    // Bootstrap exactly 50 instances
+    for(let i = 1; i <= TOTAL_CAPACITY; i++) {
+        const id = `PC-${i}`;
+        stations[id] = { status: "offline", violations: 0, name: "Available" };
+        
+        const card = document.createElement("div");
+        card.id = `card-${id}`;
+        card.className = "pc-card offline";
+        card.innerHTML = `
+            <div class="pc-icon">🌑</div>
+            <div class="pc-name" id="name-${id}">-</div>
+            <div class="pc-id">${id}</div>
+            <div class="pc-violations" id="viols-${id}">0 BREACHES</div>
+            <button class="monitor-btn" onclick="openMonitor('${id}')">LIVE MONITOR</button>
+            <div class="pc-status-text" id="status-${id}">OFFLINE</div>
+        `;
+        gridEl.appendChild(card);
+    }
+    
+    // UI Styling logic
+    const style = document.createElement('style');
+    style.innerHTML = `
+        .pc-name { font-size: 11px; color: #00ff66; margin-bottom: 2px; text-transform: uppercase; font-weight: bold; }
+        .pc-violations { font-size: 10px; margin: 4px 0; color: #888; font-family: monospace; }
+        .pc-card.normal .pc-violations { color: var(--hud-green); opacity: 0.7; }
+        .pc-card.violation .pc-violations { color: #fff; text-shadow: 0 0 5px var(--hud-red); font-weight: bold; }
+        .pc-card.normal { box-shadow: 0 0 15px rgba(0, 255, 102, 0.2); }
+        .monitor-btn { background: transparent; border: 1px solid var(--hud-green); color: var(--hud-green); font-size: 9px; padding: 4px 8px; border-radius: 4px; cursor: pointer; margin-top: 5px; display: none; transition: all 0.2s; }
+        .pc-card.normal .monitor-btn, .pc-card.violation .monitor-btn { display: inline-block; }
+        .monitor-btn:hover { background: var(--hud-green); color: #000; }
+        
+        /* Tampered State - Extreme Threat */
+        .pc-card.tampered { border-color: #ff00ff; box-shadow: 0 0 20px #ff00ff; animation: pulse-tamper 1s infinite alternate; }
+        @keyframes pulse-tamper {
+            from { box-shadow: 0 0 5px #ff00ff; background: rgba(255, 0, 255, 0.05); }
+            to { box-shadow: 0 0 25px #ff00ff; background: rgba(255, 0, 255, 0.2); }
+        }
+        .pc-card.tampered .pc-icon { color: #ff00ff; text-shadow: 0 0 10px #ff00ff; }
+        .pc-card.tampered .pc-status-text { color: #ff00ff; font-weight: bold; }
+        
+        .alert-item.critical-threat { border: 2px solid #ff00ff; background: rgba(255, 0, 255, 0.1); animation: blink-border 0.5s infinite alternate; }
+        @keyframes blink-border { from { border-color: #f0f; } to { border-color: #000; } }
+        .critical-badge { background: #ff00ff; color: #000; padding: 2px 6px; border-radius: 3px; font-weight: bold; font-size: 10px; margin-bottom: 5px; display: inline-block; }
+
+        /* Live HUD Modal */
+        #live-hud { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 80%; height: 80%; background: rgba(5,10,20,0.95); border: 2px solid var(--hud-green); z-index: 1000; display: none; flex-direction: column; padding: 20px; box-shadow: 0 0 50px rgba(0,255,102,0.3); backdrop-filter: blur(15px); }
+        #live-hud h2 { color: var(--hud-green); margin-top: 0; display: flex; justify-content: space-between; }
+        #live-stream-img { width: 100%; height: calc(100% - 60px); object-fit: contain; border: 1px solid #333; background: #000; }
+        .close-hud { cursor: pointer; color: var(--hud-red); }
+        .export-bar { margin-bottom: 20px; text-align: right; }
+        .export-btn { background: var(--hud-green); color: #000; border: none; padding: 10px 20px; font-weight: bold; border-radius: 4px; cursor: pointer; }
+    `;
+    document.head.appendChild(style);
+
+    let activeMonitorDevice = null;
+
+    function openMonitor(id) {
+        activeMonitorDevice = id;
+        document.getElementById('live-hud').style.display = 'flex';
+        document.getElementById('hud-target-name').innerText = stations[id].name + " [" + id + "]";
+        fetch('/toggle_monitoring', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ device: id, action: 'START' })
+        });
+    }
+
+    function closeMonitor() {
+        if(activeMonitorDevice) {
+            fetch('/toggle_monitoring', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ device: activeMonitorDevice, action: 'STOP' })
+            });
+        }
+        activeMonitorDevice = null;
+        document.getElementById('live-hud').style.display = 'none';
+        document.getElementById('live-stream-img').src = "";
+    }
+
+    function updateStationUI(id) {
+        const station = stations[id];
+        if (!station) return; 
+        
+        const card = document.getElementById(`card-${id}`);
+        const statusText = document.getElementById(`status-${id}`);
+        const violsText = document.getElementById(`viols-${id}`);
+        const nameText = document.getElementById(`name-${id}`);
+        if(!card) return;
+        
+        const state = station.status;
+        card.className = `pc-card ${state}`;
+        violsText.innerText = `${station.violations} BREACHES`;
+        nameText.innerText = station.name || "Unknown";
+        
+        let icon = "🌑";
+        let text = "OFFLINE";
+        if(state === "normal") { icon = "🟢"; text = "MONITORING"; }
+        if(state === "suspicious") { icon = "🟡"; text = "WARNING"; }
+        if(state === "violation") { icon = "🔴"; text = "BREACH"; }
+        if(state === "tampered") { icon = "⚠️"; text = "TAMPERED"; }
+        
+        card.querySelector('.pc-icon').innerHTML = icon;
+        statusText.innerHTML = text;
+    }
+
+    socket.on("device_heartbeat", (data) => {
+        if (stations[data.device]) {
+            if (stations[data.device].status !== "violation" && stations[data.device].status !== "tampered") {
+                stations[data.device].status = "normal";
+            }
+            stations[data.device].violations = data.violations || 0;
+            stations[data.device].name = data.name || "Unknown";
+            updateStationUI(data.device);
+        }
+    });
+
+    socket.on("device_status", (data) => {
+        if (stations[data.device]) {
+            stations[data.device].status = data.status;
+            stations[data.device].violations = data.violations || stations[data.device].violations;
+            stations[data.device].name = data.name || stations[data.device].name;
+            updateStationUI(data.device);
+        }
+    });
+
+    socket.on("live_stream", (data) => {
+        if (activeMonitorDevice === data.device) {
+            document.getElementById("live-stream-img").src = data.screenshot;
+        }
+    });
+
+    socket.on("new_alert", (data) => {
+        violationCount++;
+        document.getElementById("violationCount").innerText = violationCount;
+        
+        if (stations[data.device]) {
+            stations[data.device].status = data.is_critical ? "tampered" : "violation";
+            stations[data.device].violations = data.device_violations || (stations[data.device].violations + (data.is_critical ? 0 : 1));
+            stations[data.device].name = data.name || stations[data.device].name;
+            updateStationUI(data.device);
+            camera.position.z += 1.5;
+            setTimeout(() => { camera.position.z -= 1.5 }, 150);
+        }
+
+        if(violationCount === 1 && alertsEl.innerText.includes("No current threats")) {
+            alertsEl.innerHTML = "";
+        }
+
+        const alertItem = document.createElement("div");
+        alertItem.className = `alert-item ${data.is_critical ? 'critical-threat' : ''}`;
+        alertItem.setAttribute("data-export", "true"); 
+        
+        let imgHtml = data.screenshot 
+            ? `<img src="${data.screenshot}" alt="EVIDENCE" />` 
+            : `<div style="padding:20px; text-align:center; border:1px dashed ${data.is_critical ? '#f0f' : 'var(--hud-red)'}; color:${data.is_critical ? '#f0f' : 'var(--hud-red)'}; margin-bottom:10px;">[ ${data.is_critical ? 'EXTENSION DISABLED' : 'VISUAL EVIDENCE CORRUPT/MISSING'} ]</div>`;
+            
+        let badgeHtml = data.is_critical ? `<div class="critical-badge">CRITICAL THREAT</div>` : ``;
+
+        alertItem.innerHTML = `
+            ${imgHtml}
+            <div class="alert-meta">
+                ${badgeHtml}
+                <div style="${data.is_critical ? 'color:#f0f; font-weight:bold;' : ''}"><span>TARGET:</span> ${data.name} [${data.device}]</div>
+                <div><span>TRIGGER:</span> ${data.reason}</div>
+!               <div style="font-family:monospace; font-size:10px; opacity:0.6;">[ LATENCY BREACH DETECTED ]</div>
+                <div style="margin-top:5px; color:#aaa;">[ ${new Date(data.time).toLocaleTimeString()} ]</div>
+            </div>
+        `;
+        alertsEl.insertBefore(alertItem, alertsEl.firstChild);
+    });
+
+    function exportReport() {
+        const reportContent = document.getElementById("alerts").innerHTML;
+        const blob = new Blob([`
+            <html><head><title>Candidate Violation Report</title><style>
+                body { font-family: sans-serif; padding: 40px; background: #f4f4f4; }
+                .alert-item { background: white; padding: 20px; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+                img { max-width: 100%; height: auto; border: 1px solid #ccc; }
+                span { font-weight: bold; color: #d9534f; }
+            </style></head>
+            <body><h1>SmartClass Violation Evidence Report</h1><hr/>${reportContent}</body></html>
+        `], {type: "text/html"});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "SmartClass_Report.html";
+        a.click();
+    }
+  </script>
+
+  <!-- Live Monitoring HUD -->
+  <div id="live-hud">
+    <h2>
+        <span>LIVE FEED: <span id="hud-target-name">Target</span></span>
+        <span class="close-hud" onclick="closeMonitor()">[ EXIT ]</span>
+    </h2>
+    <img id="live-stream-img" src="" alt="WAITING FOR FEED..." />
+  </div>
+
+</body>
+</html>

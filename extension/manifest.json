@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "Smart Classroom Monitor",
+  "version": "2.0",
+  "description": "Advanced Classroom Monitoring System",
+  "permissions": [
+    "tabs",
+    "storage",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["contentScript.js"]
+    }
+  ]
+}
