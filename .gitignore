@@ -3,3 +3,4 @@ nohup.out
 __pycache__/
 .DS_Store
 violations/
+server/static/screenshots/
